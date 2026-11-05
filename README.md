@@ -7,7 +7,7 @@ Add this to `~/.config/forge/init.rhai`:
 
 ```rhai
 use_package("meow", #{
-  vc: "git@github.com:martial-plains/meow.forge.git",
+  vc: "https://github.com/martial-plains/meow.forge.git",
   demand: true,
 });
 ```
