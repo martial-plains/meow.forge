@@ -1,0 +1,364 @@
+#+title: Meow for Forge
+#+options: toc:2
+
+Meow is modal editing for Emacs: selection first, then commands that act
+on the selection. It is not Vim emulation and not a modal layer over Vim
+keys — it is Meow's own idea, ported to Forge.
+
+Three states:
+
+| State  | Lighter | Cursor    | What it is |
+|--------+---------+-----------+------------|
+| Normal | ~[N]~   | box       | every key runs a command |
+| Insert | ~[I]~   | bar       | keys type |
+| Motion | ~[M]~   | unchanged | the mode's own keys, with ~SPC~ for the keypad |
+
+Nothing needs a chord. Emacs's own keys stay reachable through the keypad,
+so ~C-x C-f~ is ~SPC x f~.
+
+This is a port of Emacs's [[https://github.com/positivelysis/meow][Meow]],
+covering its QWERTY layout and 129 of its 132 commands. What is missing, and
+why, is in [[*Not ported]].
+
+* Install
+
+The installer builds it and puts it where Forge loads plugins at startup:
+
+#+begin_src sh
+  scripts/install-plugins.sh meow
+#+end_src
+
+Or by hand:
+
+#+begin_src sh
+  rustup target add wasm32-wasip2
+  cd plugins/meow
+  cargo build --release --target wasm32-wasip2
+  cp target/wasm32-wasip2/release/forge_meow.wasm \
+     ~/.config/forge/plugins/meow.wasm
+#+end_src
+
+The plugin asks for no permissions: no files, no network, no programs.
+
+* Turn it on
+
+Installing it is what turns it on: the plugin puts every buffer into normal
+state as it starts, and into every new buffer as that opens. = M-x meow-mode =
+toggles it everywhere, and again puts Emacs back.
+
+So what = init.rhai = is for is binding the commands you want to reach without
+typing = M-x =. Bindings are resolved lazily and checked after plugins load,
+so binding a Meow command there is fine even though = init.rhai = runs first:
+
+#+begin_src lua
+  -- ~/.config/forge/init.rhai
+
+  forge.keymap.set("C-x m m", "meow-mode")           -- toggle everywhere
+  forge.keymap.set("C-x m n", "meow-normal-state")
+  forge.keymap.set("C-x m i", "meow-insert-state")
+  forge.keymap.set("C-x m d", "meow-describe-key")  -- read a key, say what it is
+  forge.keymap.set("C-x m t", "meow-cheatsheet")    -- what every key runs
+  forge.keymap.set("C-x m k", "meow-keypad")        -- the keypad
+  forge.keymap.set("C-x m a", "meow-digit-argument")  -- a count, then a key
+#+end_src
+
+= M-x list-plugins = shows whether it has started, and its commands are in
+= M-x = under ~meow~.
+
+Note that = init.rhai = runs *before* plugins are loaded, so
+= forge.command.run("meow-mode") = there would find no such command yet.
+Binding a key to it, as above, does work.
+
+** Which state a buffer starts in
+
+A buffer's state comes from its major mode. Text, prog, conf and
+fundamental modes start in normal state; special modes such as Help, Dired,
+Info, the buffer list, ~*Messages*~ and WebKit pages start in motion state,
+so their own keys keep working. Derived modes inherit their parent's state.
+
+~meow-mode-state-list~ overrides this, the same way it does in Emacs. It
+takes a whole table, so repeat the defaults you want to keep:
+
+#+begin_src lua
+  forge.plugin.config("meow", {
+    ["meow-mode-state-list"] = {
+      ["conf-mode"] = "normal",
+      ["fundamental-mode"] = "normal",
+      ["help-mode"] = "motion",
+      ["prog-mode"] = "normal",
+      ["special-mode"] = "motion",
+      ["text-mode"] = "normal",
+      ["notes-mode"] = "insert",
+    },
+  })
+#+end_src
+
+The plugin watches for new buffers itself, so this is all a new mode needs.
+
+* Keys
+
+** Normal state
+
+Meow's QWERTY layout, key for key.
+
+| Key   | Command                     |                     |
+|-------+-----------------------------+---------------------|
+| ~h~ ~j~ ~k~ ~l~ | ~meow-left~ ~meow-next~ ~meow-prev~ ~meow-right~ | move, cancelling the selection |
+| ~H~ ~J~ ~K~ ~L~ | ~meow-left-expand~ ...                     | move, extending the selection   |
+| ~w~   | ~meow-mark-word~            | select the word at point |
+| ~W~   | ~meow-mark-symbol~          | select the symbol at point |
+| ~e~   | ~meow-next-word~            | select to the end of the next word |
+| ~E~   | ~meow-next-symbol~          | select to the end of the next symbol |
+| ~b~   | ~meow-back-word~            | select to the start of the previous word |
+| ~B~   | ~meow-back-symbol~          | as above, by symbol |
+| ~x~   | ~meow-line~                 | select the line; again, one more |
+| ~f~   | ~meow-find~                 | select to a character (reads it) |
+| ~t~   | ~meow-till~                 | select up to a character |
+| ~;~   | ~meow-reverse~              | swap the ends of the selection |
+| ~g~   | ~meow-cancel-selection~     | cancel the selection |
+| ~d~   | ~meow-delete~               | delete forward, or the selection |
+| ~D~   | ~meow-backward-delete~      | delete backward, or the selection |
+| ~c~   | ~meow-change~               | change: delete it and insert |
+| ~y~   | ~meow-save~                 | copy the selection |
+| ~p~   | ~meow-yank~                 | paste |
+| ~i~   | ~meow-insert~               | insert before |
+| ~a~   | ~meow-append~               | insert after |
+| ~o~   | ~meow-open-below~           | open a line below |
+| ~O~   | ~meow-open-above~           | open a line above |
+| ~u~   | ~meow-undo~                 | undo |
+| ~U~   | ~meow-undo-in-selection~    | undo, keeping the selection |
+| ~m~   | ~meow-join~                 | join the surrounding lines |
+| ~n~   | ~meow-search~               | search again for the last regexp |
+| ~v~   | ~meow-visit~                | search for a regexp and select it |
+| ~/~   | ~meow-search~               | as ~n~ |
+| ~:~   | ~execute-extended-command~  | ~M-x~ |
+| ~r~   | ~meow-replace~              | replace the selection with the last saved text |
+| ~R~   | ~meow-swap-grab~            | swap the selection with the grab |
+| ~G~   | ~meow-grab~                 | save the selection as a grab |
+| ~Y~   | ~meow-sync-grab~            | replace the grab with the selection |
+| ~z~   | ~meow-pop-selection~        | back to the previous selection |
+| ~o~ ~O~ | ~meow-block~ ~meow-to-block~ | select a balanced block |
+| ~q~   | ~meow-quit~                 | close the window |
+| ~Q~ ~X~ | ~meow-goto-line~            | go to a line and select it |
+| ~'~   | ~meow-repeat-last-key~      | run a normal-state key again |
+| ~0-9~ | ~meow-expand-0..9~          | expand the selection by that many |
+| ~-~   | ~negative-argument~         | a negative count |
+| ~,~ ~.~ ~[~ ~]~ | ~meow-inner-of-thing~ ~meow-bounds-of-thing~ ~meow-beginning-of-thing~ ~meow-end-of-thing~ | things, which read a key |
+| ~SPC~ | ~meow-keypad~               | the keypad (below) |
+| ~ESC~ | ~meow-cancel-selection~     | cancel |
+
+Anything else in normal state says "not bound in normal state" rather than
+inserting, so a stray key never edits the buffer.
+
+** Things
+
+Four commands read one more key, and it is one of these:
+
+| Key | Thing                        |
+|-----+------------------------------|
+| ~r~ | round brackets ~(...)~       |
+| ~s~ | square brackets ~[...]~       |
+| ~c~ | curly brackets ~{...}~       |
+| ~g~ | string ~"..."~               |
+| ~e~ | symbol (as one word)         |
+| ~w~ | the window on screen         |
+| ~b~ | the whole buffer             |
+| ~p~ | paragraph                    |
+| ~l~ | line                         |
+| ~v~ | visual line                  |
+| ~d~ | defun                        |
+| ~.~ | sentence                     |
+
+= , = inner, = . = bounds, = [ = beginning, = ] = end.
+
+= M-x meow-mark-thing =, = M-x meow-next-thing = and = M-x meow-kill-thing =
+ask for the same key.
+
+** Counts
+
+A digit in normal state expands the selection (= ~0~..~9~ =). For a count
+*before* a command, use Meow's leader: = M-x meow-digit-argument = reads
+digits and then one key, so ~3 d~ deletes three characters.
+
+#+begin_src lua
+  -- Give the leader a key of your own; Meow needs none because its digits
+  -- are already taken by meow-expand-N.
+  forge.keymap.set("C-x m a", "meow-digit-argument")
+  forge.keymap.set("M-1", "meow-digit-argument")
+  forge.keymap.set("M--", "meow-universal-argument")
+#+end_src
+
+Forge's own leader works too: ~C-c 3 d~ reaches the same commands, and the
+keypad's ~SPC c~ is that map without the chord.
+
+** The keypad
+
+=SPC= takes Emacs keys one at a time, so nothing needs a chord:
+
+| You type   | It runs      |
+|------------+--------------|
+| ~SPC x f~   | ~C-x C-f~    |
+| ~SPC c t t~ | ~C-c C-t C-t~|
+| ~SPC m t~   | ~M-t~        |
+| ~SPC g x~   | ~C-M-x~      |
+| ~SPC a~     | your ~C-c~ map |
+| ~SPC x SPC p~ | ~C-x p~    |
+| ~SPC SPC x~ | a literal ~x~ |
+
+If the translated key isn't bound, the plain one is tried (~SPC x f~ falls
+back to ~C-x f~ when ~C-x C-f~ is unbound), so your own ~C-x~ bindings are
+still reachable.
+
+The keypad is a =transient keymap= rather than keys read one at a time: each
+key it offers is a real binding in a map that sits above every other layer
+while it is up. That is why ~ESC~ and ~C-g~ close it (~M-x meow-keypad-quit=
+also does), and why its keys show up in ~describe-key~ and the prefix hints.
+It is closed as soon as it has a whole sequence to run.
+
+** Insert state
+
+Everything types. = ESC = goes back to normal.
+
+** Motion state
+
+Motion state is for modes whose own keys already do the right thing:
+Dired, Help, Info, the buffer list, WebKit pages. It leaves those bindings
+alone and only puts the keypad on ~SPC~, so ~SPC x f~ and the rest still
+work. Add motion keys with ~meow-motion-define-key~ when a mode wants more,
+for example ~j~ and ~k~ for ~next-line~ and ~previous-line~.
+
+*** Web pages: Vim-style keys
+
+A WebKit page (~M-x webkit~) in motion state gets keys that browse the Vim
+way. They sit above the page's own Emacs keys, so a key both define does
+what the Vim-style key does; any other page key still works. Escape from a page's text field gives the keys back, and a count
+works (~5j~).
+
+| Keys           | Does |
+|----------------+------|
+| ~j~ ~k~ ~h~ ~l~ | scroll down, up, left, right |
+| ~d~ ~u~        | scroll half a screen down, up |
+| ~g g~ ~G~      | top, bottom |
+| ~f~            | label every link and control; type a label to follow it |
+| ~F~            | the same, opening the link in a new page |
+| ~y f~          | the same, copying the link's address |
+| ~] ]~ ~[ [~    | the page's next, previous link |
+| ~o~ ~O~ ~t~    | open an address or search here, or in a new page |
+| ~p~ ~P~        | open the last copied text here, or in a new page |
+| ~H~ ~L~        | back, forward |
+| ~g h~          | pick from the page's history |
+| ~g u~ ~g U~    | up one level in the address, the top of the site |
+| ~r~            | reload |
+| ~x~ ~X~        | close the page, bring back the last closed one |
+| ~J~ ~K~ ~T~    | previous page, next page, pick a page |
+| ~/~ ~n~ ~N~    | find, next match, previous match |
+| ~y y~ ~y s~    | copy the address, copy the selection |
+| ~i~ ~g i~      | send keys to the page; put the cursor in its first text field |
+| ~z i~ ~z o~ ~z z~ | zoom in, out, reset |
+
+~meow-webkit-keys~ turns the layer off and on (or set =meow-webkit-keys= to
+=false= in the plugin's config). Not ported: Safari's tab pinning and moving,
+bookmarks and quick-open search engines, marks, per-site blacklists, custom
+JavaScript commands, and opening a link in the background; Meow's own states
+stand in for Vim's insert and normal.
+
+* What it is like to use
+
+Selecting and then acting is the whole idea:
+
+#+begin_src text
+  3 x          select three lines
+  c "hi" RET   change them to "hi"
+  ESC 0 x      select the line above
+  c RET        leave an empty line
+#+end_src
+
+Because a command acts on the selection, the same key does the obvious thing
+whether there is a selection or not: = d = deletes it, or else the character
+at point.
+
+* Not ported
+
+Three of Meow's 132 commands have no equivalent here:
+
+- ~meow-clipboard-save~, ~meow-clipboard-kill~, ~meow-clipboard-yank~.
+  Forge's plugin API ([~wit/forge-editor.wit~]) has no clipboard, so there is
+  nothing for these to talk to. They are absent rather than broken. The kill
+  ring (~meow-save~ / ~meow-yank~) works.
+
+Two differences worth knowing:
+
+- ~meow-last-buffer~ goes back in Emacs. Forge has no previous-buffer
+  command, so it opens the buffer list.
+- ~meow-repeat-last-key~ (~'~) asks for the key rather than repeating the
+  last one, because Forge has no ~repeat~ command.
+
+Meow's sexp commands run Emacs key sequences there. Forge binds none of
+~C-~)~ ~C-~(~ ~C-~}~ ~C-~{~ ~M-r~ ~M-t~ ~M-s~ ~M-J~, so each operation —
+slurp, barf, raise, transpose, split, join, splice, wrap — is worked out
+here against the buffer text instead. All of them are = M-x = reachable.
+
+** Beacon
+
+The editor has no multiple cursors, so the beacon works on the text
+instead. ~meow-beacon-start~ (M-x) marks every place the selection occurs
+(or the word at point; or, for a selection over several lines, the same
+column on each line) and highlights them. In beacon state, ~i~ ~a~ ~c~
+~C~ ~s~ ~r~ ~d~ ask for text once and put it at every place; ~n~ ~p~ move
+between places; ~m~ runs the last keyboard macro at each; ESC leaves.
+It does not type at every place as you go, and it does not record a macro
+for you.
+
+** More commands
+
+~meow-indent~, ~meow-back-to-indentation~, ~meow-comment~, ~meow-M-x~,
+~meow-eval-last-exp~ (asks for Lua: Forge has no Lisp), ~meow-global-mode~,
+~meow-motion-mode~, ~meow-keypad-mode~, ~meow-register-state~,
+~meow-define-key~ and the ~-normal-~ / ~-motion-~ / ~-leader-define-key~
+forms (they prompt; in init.rhai use ~forge.bind_in_mode~),
+~meow-keypad-undo~ (DEL in the keypad), ~meow-describe-keymap~,
+~meow-display-thing-help~, ~meow-char-thing-table~, ~meow-update-display~,
+~meow-setup-indicator~ and ~meow-setup-line-number~.
+
+Still absent, because the plugin API has nothing to build them on: a shared
+kill ring, overlays beyond highlights, real multiple cursors, selection
+types and directions, a thing registry, and the optional shims for other
+packages.
+
+Meow's tutor is an Emacs package of its own, and its cheatsheet
+draws a picture, so = M-x meow-cheatsheet = here prints the layer as text
+instead and = M-x meow-describe-key = answers "what is this key?".
+
+* Reconfiguring
+
+Every key is a normal mode binding, so = init.rhai = can move any of them:
+
+#+begin_src rhai
+  // Meow's SPC would be nicer as C-c for reaching Emacs keys with a chord.
+  forge.keymap.set("M-SPC", "meow-keypad", #{ mode: "meow-normal-mode" });
+
+  // Vim habits, if you miss them.
+  forge.keymap.set("dw", "meow-kill-word", #{ mode: "meow-normal-mode" });
+  forge.keymap.set("gg", "meow-beginning-of-buffer", #{ mode: "meow-normal-mode" });
+
+  // Meow's find, on f, but to the end of the word instead.
+  forge.keymap.set("f", "meow-next-word", #{ mode: "meow-normal-mode" });
+#+end_src
+
+The command table in ~src/lib.rs~ is the reference: ~NORMAL_LAYER~ is Meow's
+QWERTY layout, and everything else is registered in ~init~.
+
+* Working on it
+
+#+begin_src sh
+  cd plugins/meow
+  cargo test                 # the text-level logic: pairs, things, edits
+  cargo clippy
+  cargo build --release --target wasm32-wasip2
+#+end_src
+
+The structural edits are planned as a = Plan= — one span to replace and
+where point ends up — over the buffer's flat text, so the editing logic is
+tested without a buffer. ~Plan~ is applied by ~apply~.
+
+Rust edition 2024.

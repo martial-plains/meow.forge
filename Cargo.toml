@@ -1,0 +1,24 @@
+[package]
+name = "forge-meow"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Modal editing: selection first, in the spirit of Emacs Meow."
+
+[package.metadata.forge]
+name = "meow"
+
+# Standalone: not part of the main workspace build.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+forge-plugin-sdk = { git = "https://github.com/martial-plains/forge" }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+
+
+[profile.release]
+opt-level = "s"
+lto = true
