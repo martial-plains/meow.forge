@@ -8,7 +8,6 @@ Add this to `~/.config/forge/init.rhai`:
 ```rhai
 use_package("meow", #{
   vc: "https://github.com/martial-plains/forge-plugin-meow",
-  pin: "v0.1.0",
   demand: true,
 });
 ```
